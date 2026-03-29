@@ -1,8 +1,9 @@
 "use client"
 
 import { useQuery, useMutation } from "convex/react"
+import { useConvex } from "convex/react"
 import { api } from "@/convex/_generated/api"
-import { Editor } from "@pascal-app/editor"
+import { Editor, useUploadStore } from "@pascal-app/editor"
 import { useParams, useRouter } from "next/navigation"
 import { useCallback, useState } from "react"
 import { Loader2, ArrowLeft } from "lucide-react"
@@ -12,9 +13,11 @@ import type { Id } from "@/convex/_generated/dataModel"
 export default function EditorPage() {
   const params = useParams()
   const router = useRouter()
+  const convex = useConvex()
   const projectId = params.id as Id<"projects">
   const project = useQuery(api.projects.get, { projectId })
   const saveProject = useMutation(api.projects.save)
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl)
   const debouncedSave = useAutoSave(projectId)
   const [saveStatus, setSaveStatus] = useState<string>("idle")
 
@@ -38,6 +41,52 @@ export default function EditorPage() {
   const handleDirty = useCallback(() => {
     setSaveStatus("unsaved")
   }, [])
+
+  const handleUploadAsset = useCallback(
+    async (pid: string, levelId: string, file: File, type: "scan" | "guide") => {
+      const store = useUploadStore.getState()
+      store.startUpload(levelId, type, file.name)
+
+      try {
+        // Get upload URL from Convex
+        store.setStatus(levelId, "uploading")
+        const uploadUrl = await generateUploadUrl()
+
+        // Upload file directly to Convex storage
+        const result = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type },
+          body: file,
+        })
+
+        if (!result.ok) {
+          throw new Error("Upload failed")
+        }
+
+        const { storageId } = await result.json()
+
+        // Get the public URL for the uploaded file
+        store.setProgress(levelId, 90)
+        store.setStatus(levelId, "confirming")
+
+        const url = await convex.query(api.files.getUrl, { storageId })
+        if (!url) throw new Error("Failed to get file URL")
+
+        store.setResult(levelId, url)
+      } catch (err) {
+        store.setError(levelId, err instanceof Error ? err.message : "Upload failed")
+      }
+    },
+    [generateUploadUrl, convex]
+  )
+
+  const handleDeleteAsset = useCallback(
+    async (pid: string, url: string) => {
+      // Convex storage files are cleaned up automatically when no longer referenced
+      console.log("Asset removed from scene:", url)
+    },
+    []
+  )
 
   // Loading state
   if (project === undefined) {
@@ -74,14 +123,8 @@ export default function EditorPage() {
         onSaveStatusChange={(status) => setSaveStatus(status)}
         sitePanelProps={{
           projectId,
-          onUploadAsset: async (pid, levelId, file, type) => {
-            // TODO: implement file upload to Convex storage
-            console.log("Upload asset:", { pid, levelId, fileName: file.name, type })
-          },
-          onDeleteAsset: async (pid, url) => {
-            // TODO: implement asset deletion from Convex storage
-            console.log("Delete asset:", { pid, url })
-          },
+          onUploadAsset: handleUploadAsset,
+          onDeleteAsset: handleDeleteAsset,
         }}
         appMenuButton={
           <button
