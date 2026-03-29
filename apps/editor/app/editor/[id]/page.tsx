@@ -72,6 +72,17 @@ export default function EditorPage() {
         onSave={handleSave}
         onDirty={handleDirty}
         onSaveStatusChange={(status) => setSaveStatus(status)}
+        sitePanelProps={{
+          projectId,
+          onUploadAsset: async (pid, levelId, file, type) => {
+            // TODO: implement file upload to Convex storage
+            console.log("Upload asset:", { pid, levelId, fileName: file.name, type })
+          },
+          onDeleteAsset: async (pid, url) => {
+            // TODO: implement asset deletion from Convex storage
+            console.log("Delete asset:", { pid, url })
+          },
+        }}
         appMenuButton={
           <button
             onClick={() => router.push("/")}
